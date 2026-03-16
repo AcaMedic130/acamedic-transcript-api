@@ -1,74 +1,42 @@
+import { YoutubeTranscript } from 'youtube-transcript';
+
 export default async function handler(req, res) {
+  // 1. Configuramos los encabezados CORS para permitir peticiones desde tu frontend
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
 
+  // Si es una petición de pre-vuelo (CORS), respondemos OK
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  // 2. Obtenemos el ID del video de la URL
   const videoId = req.query.v;
-  if (!videoId) return res.status(400).json({ success: false, error: 'Falta el ID del video.' });
+  if (!videoId) {
+    return res.status(400).json({ success: false, error: 'Falta el ID del video.' });
+  }
 
   try {
-    // 1. Petición simulando un navegador real con cookies de sesión mínima
-    const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-        'Cache-Control': 'no-cache',
-        'Cookie': 'CONSENT=YES+cb.20210328-17-p0.es+FX+478'
-      }
-    });
+    // 3. Obtenemos los subtítulos usando la librería. 
+    // Intentamos en español ('es') primero, y si falla, obtenemos el idioma por defecto.
+    const transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'es' })
+      .catch(() => YoutubeTranscript.fetchTranscript(videoId));
 
-    const html = await response.text();
+    // 4. Formateamos los datos para mantener la misma estructura que tenías antes
+    const formattedData = transcript.map(item => ({
+      // La librería suele devolver el offset en milisegundos. Lo dividimos entre 1000 para tener segundos.
+      // (Si notas que los tiempos van muy lento en tu frontend, quita el "/ 1000")
+      start: item.offset / 1000, 
+      text: item.text.trim()
+    }));
 
-    // 2. Extraer el JSON de configuración donde YouTube guarda las pistas de subtítulos
-    const regex = /"captionTracks":\s*(\[.*?\])/;
-    const match = html.match(regex);
-
-    if (!match) {
-      // Intento alternativo buscando en la variable global de YouTube
-      const altRegex = /ytInitialPlayerResponse\s*=\s*({.+?});/;
-      const altMatch = html.match(altRegex);
-      
-      if (altMatch) {
-        const playerResponse = JSON.parse(altMatch[1]);
-        const tracks = playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-        if (tracks) return processTracks(tracks, res);
-      }
-      
-      throw new Error("Este video no tiene subtítulos habilitados o YouTube bloqueó la lectura.");
-    }
-
-    const tracks = JSON.parse(match[1]);
-    return processTracks(tracks, res);
+    // 5. Enviamos la respuesta exitosa
+    return res.status(200).json({ success: true, data: formattedData });
 
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    // 6. Si algo sale mal (ej. el video realmente no tiene subtítulos), devolvemos error
+    return res.status(500).json({ 
+      success: false, 
+      error: "Este video no tiene subtítulos habilitados o YouTube bloqueó la lectura.",
+      details: error.message
+    });
   }
-}
-
-// Función auxiliar para procesar y limpiar los datos
-async function processTracks(tracks, res) {
-  // Prioridad: 1. Español, 2. Inglés, 3. Primera disponible
-  const selectedTrack = tracks.find(t => t.languageCode === 'es') || 
-                        tracks.find(t => t.languageCode === 'en') || 
-                        tracks[0];
-
-  const transcriptResponse = await fetch(selectedTrack.baseUrl + "&fmt=json3");
-  const data = await transcriptResponse.json();
-
-  const formattedData = data.events
-    .filter(event => event.segs)
-    .map(event => ({
-      start: event.tStartMs / 1000,
-      text: event.segs.map(s => s.utf8).join('').trim()
-    }))
-    .filter(item => item.text !== '');
-
-  const fullText = formattedData.map(d => d.text).join(' ');
-
-  res.status(200).json({
-    success: true,
-    data: formattedData,
-    fullText
-  });
 }
