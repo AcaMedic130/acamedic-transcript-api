@@ -1,4 +1,5 @@
-import { YoutubeTranscript } from 'youtube-transcript';
+// Importación por defecto en lugar de importación nombrada con llaves
+import YoutubeTranscript from 'youtube-transcript';
 
 export default async function handler(req, res) {
   // 1. Configurar CORS
@@ -18,7 +19,11 @@ export default async function handler(req, res) {
 
   try {
     // 3. Extraer los subtítulos
-    const transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'es' });
+    // TRUCO DE SEGURIDAD: A veces las librerías CommonJS envuelven su exportación en ".default" 
+    // cuando se usan dentro de un entorno de ES Modules (como Vercel).
+    const ytAPI = YoutubeTranscript.default || YoutubeTranscript;
+    
+    const transcript = await ytAPI.fetchTranscript(videoId, { lang: 'es' });
 
     // 4. Formatear los datos
     const formattedData = transcript.map(t => ({
