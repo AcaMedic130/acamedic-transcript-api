@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
   try {
 
-    // 1️⃣ descargar HTML del video
+    // 1️⃣ obtener HTML del video
     const html = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
       headers: {
         "User-Agent": "Mozilla/5.0"
@@ -18,26 +18,35 @@ export default async function handler(req, res) {
     }).then(r => r.text());
 
     // 2️⃣ extraer ytInitialPlayerResponse
-    const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{.*?\})\s*;/s);
+    const json = html.split("ytInitialPlayerResponse = ")[1].split(";</script>")[0];
 
-    if (!match) {
-      return res.status(500).json({ error: "Player response not found" });
-    }
-
-    const playerResponse = JSON.parse(match[1]);
+    const player = JSON.parse(json);
 
     const tracks =
-      playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      player?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
     if (!tracks || tracks.length === 0) {
       return res.status(404).json({ error: "No subtitles available" });
     }
 
-    // 3️⃣ obtener URL real del transcript
-    const baseUrl = tracks[0].baseUrl + "&fmt=json3";
+    // 3️⃣ obtener URL real de subtítulos
+    let baseUrl = tracks[0].baseUrl;
 
-    const data = await fetch(baseUrl).then(r => r.json());
+    // asegurar formato json3
+    if (!baseUrl.includes("fmt=")) {
+      baseUrl += "&fmt=json3";
+    } else {
+      baseUrl = baseUrl.replace("fmt=srv3", "fmt=json3");
+    }
 
+    // 4️⃣ descargar subtítulos
+    const data = await fetch(baseUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
+    }).then(r => r.json());
+
+    // 5️⃣ convertir eventos a texto
     const transcript = data.events
       .filter(e => e.segs)
       .map(e => ({
@@ -53,10 +62,10 @@ export default async function handler(req, res) {
       fullText
     });
 
-  } catch (error) {
+  } catch (err) {
 
     res.status(500).json({
-      error: error.message
+      error: err.message
     });
 
   }
