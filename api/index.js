@@ -5,55 +5,53 @@ export default async function handler(req, res) {
   const videoId = req.query.v;
 
   if (!videoId) {
-    return res.status(400).json({ error: "Falta el videoId" });
+    return res.status(400).json({ error: "Missing video id" });
   }
 
   try {
 
-    // 1️⃣ obtener lista de idiomas
-    const listUrl = `https://www.youtube.com/api/timedtext?v=${videoId}&type=list`;
+    const html = await fetch(`https://www.youtube.com/watch?v=${videoId}`)
+      .then(r => r.text());
 
-    const listRes = await fetch(listUrl);
-    const listXml = await listRes.text();
+    const playerResponseMatch = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});/);
 
-    const langMatch = listXml.match(/lang_code="([^"]+)"/);
-
-    if (!langMatch) {
-      return res.status(404).json({
-        success:false,
-        error:"El video no tiene subtítulos"
-      });
+    if (!playerResponseMatch) {
+      return res.status(404).json({ error: "No player response found" });
     }
 
-    const lang = langMatch[1];
+    const playerResponse = JSON.parse(playerResponseMatch[1]);
 
-    // 2️⃣ obtener subtítulos
-    const url = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}`;
+    const tracks =
+      playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
-    const response = await fetch(url);
-    const xml = await response.text();
+    if (!tracks || tracks.length === 0) {
+      return res.status(404).json({ error: "No subtitles available" });
+    }
 
-    const matches = [...xml.matchAll(/<text start="([^"]+)" dur="([^"]+)">([^<]+)<\/text>/g)];
+    const baseUrl = tracks[0].baseUrl;
 
-    const transcript = matches.map(m => ({
-      start: parseFloat(m[1]),
-      text: decodeURIComponent(m[3])
-    }));
+    const transcriptData = await fetch(baseUrl + "&fmt=json3")
+      .then(r => r.json());
+
+    const transcript = transcriptData.events
+      .filter(e => e.segs)
+      .map(e => ({
+        start: e.tStartMs / 1000,
+        text: e.segs.map(s => s.utf8).join("")
+      }));
 
     const fullText = transcript.map(t => t.text).join(" ");
 
     res.status(200).json({
-      success:true,
-      lang,
+      success: true,
       transcript,
       fullText
     });
 
-  } catch (error) {
+  } catch (err) {
 
     res.status(500).json({
-      success:false,
-      error:error.message
+      error: err.message
     });
 
   }
