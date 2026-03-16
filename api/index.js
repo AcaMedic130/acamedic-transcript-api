@@ -5,7 +5,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 // 3. Importamos la librería usando el método clásico (CommonJS)
-import { YoutubeTranscript } from 'youtube-transcript';
+import YoutubeTranscript from 'youtube-transcript';
 
 export default async function handler(req, res) {
   // Configurar CORS para permitir que tu página web se conecte sin bloqueos
