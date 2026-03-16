@@ -5,77 +5,43 @@ export default async function handler(req, res) {
     const videoId = req.query.v;
 
     if (!videoId) {
-      return res.status(400).json({ error: "Missing video id" });
-    }
-
-    const clients = [
-      {
-        clientName: "ANDROID",
-        clientVersion: "17.31.35",
-        userAgent: "com.google.android.youtube/17.31.35 (Linux; Android 11)"
-      },
-      {
-        clientName: "WEB",
-        clientVersion: "2.20240101.00.00",
-        userAgent: "Mozilla/5.0"
-      },
-      {
-        clientName: "TVHTML5",
-        clientVersion: "7.20240101.00.00",
-        userAgent: "Mozilla/5.0"
-      }
-    ];
-
-    let tracks = null;
-    let debug = [];
-
-    for (const client of clients) {
-
-      const r = await fetch(
-        "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "user-agent": client.userAgent
-          },
-          body: JSON.stringify({
-            context: {
-              client: {
-                clientName: client.clientName,
-                clientVersion: client.clientVersion
-              }
-            },
-            videoId
-          })
-        }
-      );
-
-      const j = await r.json();
-
-      debug.push({
-        client: client.clientName,
-        playability: j.playabilityStatus?.status
+      return res.status(400).json({
+        error: "Missing video id"
       });
-
-      if (
-        j.captions &&
-        j.captions.playerCaptionsTracklistRenderer &&
-        j.captions.playerCaptionsTracklistRenderer.captionTracks
-      ) {
-
-        tracks =
-          j.captions.playerCaptionsTracklistRenderer.captionTracks;
-
-        break;
-      }
-
     }
 
-    if (!tracks) {
+    const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+    const r = await fetch(url, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      }
+    });
+
+    const html = await r.text();
+
+    // extraer ytInitialPlayerResponse
+    const match = html.match(
+      /ytInitialPlayerResponse\s*=\s*(\{.+?\});/
+    );
+
+    if (!match) {
       return res.json({
-        step: "no_captions_found",
-        debug
+        step: "extract_player_response_failed"
+      });
+    }
+
+    const player = JSON.parse(match[1]);
+
+    const tracks =
+      player.captions
+        ?.playerCaptionsTracklistRenderer
+        ?.captionTracks;
+
+    if (!tracks || tracks.length === 0) {
+      return res.json({
+        step: "no_caption_tracks"
       });
     }
 
@@ -85,9 +51,7 @@ export default async function handler(req, res) {
 
     const subtitleUrl = track.baseUrl + "&fmt=json3";
 
-    const subs = await fetch(subtitleUrl, {
-      headers: { "user-agent": "Mozilla/5.0" }
-    });
+    const subs = await fetch(subtitleUrl);
 
     const json = await subs.json();
 
