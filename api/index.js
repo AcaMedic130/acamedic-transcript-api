@@ -10,43 +10,28 @@ export default async function handler(req, res) {
 
   try {
 
-    // 1️⃣ obtener HTML del video
+    // 1️⃣ descargar HTML del video
     const html = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      }
+      headers: { "User-Agent": "Mozilla/5.0" }
     }).then(r => r.text());
 
-    // 2️⃣ extraer ytInitialPlayerResponse
-    const json = html.split("ytInitialPlayerResponse = ")[1].split(";</script>")[0];
+    // 2️⃣ buscar directamente el URL de timedtext
+    const match = html.match(/https:\/\/www\.youtube\.com\/api\/timedtext[^\"]+/);
 
-    const player = JSON.parse(json);
-
-    const tracks =
-      player?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-
-    if (!tracks || tracks.length === 0) {
-      return res.status(404).json({ error: "No subtitles available" });
+    if (!match) {
+      return res.status(404).json({ error: "Timedtext URL not found" });
     }
 
-    // 3️⃣ obtener URL real de subtítulos
-    let baseUrl = tracks[0].baseUrl;
+    let timedtextUrl = match[0];
 
-    // asegurar formato json3
-    if (!baseUrl.includes("fmt=")) {
-      baseUrl += "&fmt=json3";
-    } else {
-      baseUrl = baseUrl.replace("fmt=srv3", "fmt=json3");
+    // asegurar formato JSON
+    if (!timedtextUrl.includes("fmt=json3")) {
+      timedtextUrl += "&fmt=json3";
     }
 
-    // 4️⃣ descargar subtítulos
-    const data = await fetch(baseUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      }
-    }).then(r => r.json());
+    // 3️⃣ descargar subtítulos
+    const data = await fetch(timedtextUrl).then(r => r.json());
 
-    // 5️⃣ convertir eventos a texto
     const transcript = data.events
       .filter(e => e.segs)
       .map(e => ({
@@ -59,13 +44,14 @@ export default async function handler(req, res) {
     res.status(200).json({
       success: true,
       transcript,
-      fullText
+      fullText,
+      url: timedtextUrl
     });
 
-  } catch (err) {
+  } catch (error) {
 
     res.status(500).json({
-      error: err.message
+      error: error.message
     });
 
   }
