@@ -5,91 +5,99 @@ export default async function handler(req, res) {
     const videoId = req.query.v;
 
     if (!videoId) {
-      return res.status(400).json({
-        error: "missing video id"
-      });
+      return res.status(400).json({ error: "Missing video id" });
     }
 
-    // STEP 1 — PLAYER API (ANDROID CLIENT)
-
-    const playerRes = await fetch(
-      "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+    const clients = [
       {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "user-agent": "com.google.android.youtube/17.31.35 (Linux; U; Android 11)"
-        },
-        body: JSON.stringify({
-          context: {
-            client: {
-              clientName: "ANDROID",
-              clientVersion: "17.31.35",
-              androidSdkVersion: 30
-            }
-          },
-          videoId: videoId
-        })
+        clientName: "ANDROID",
+        clientVersion: "17.31.35",
+        userAgent: "com.google.android.youtube/17.31.35 (Linux; Android 11)"
+      },
+      {
+        clientName: "WEB",
+        clientVersion: "2.20240101.00.00",
+        userAgent: "Mozilla/5.0"
+      },
+      {
+        clientName: "TVHTML5",
+        clientVersion: "7.20240101.00.00",
+        userAgent: "Mozilla/5.0"
       }
-    );
+    ];
 
-    const playerJson = await playerRes.json();
+    let tracks = null;
+    let debug = [];
 
-    if (!playerJson.captions) {
+    for (const client of clients) {
+
+      const r = await fetch(
+        "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "user-agent": client.userAgent
+          },
+          body: JSON.stringify({
+            context: {
+              client: {
+                clientName: client.clientName,
+                clientVersion: client.clientVersion
+              }
+            },
+            videoId
+          })
+        }
+      );
+
+      const j = await r.json();
+
+      debug.push({
+        client: client.clientName,
+        playability: j.playabilityStatus?.status
+      });
+
+      if (
+        j.captions &&
+        j.captions.playerCaptionsTracklistRenderer &&
+        j.captions.playerCaptionsTracklistRenderer.captionTracks
+      ) {
+
+        tracks =
+          j.captions.playerCaptionsTracklistRenderer.captionTracks;
+
+        break;
+      }
+
+    }
+
+    if (!tracks) {
       return res.json({
-        step: "captions",
-        error: "video has no captions",
-        playability: playerJson.playabilityStatus
+        step: "no_captions_found",
+        debug
       });
     }
 
-    const tracks =
-      playerJson.captions
-        .playerCaptionsTracklistRenderer
-        .captionTracks;
-
-    if (!tracks || tracks.length === 0) {
-      return res.json({
-        step: "tracks",
-        error: "no caption tracks"
-      });
-    }
-
-    // escoger español si existe
-    let track =
+    const track =
       tracks.find(t => t.languageCode === "es") ||
       tracks[0];
 
-    const timedtextUrl = track.baseUrl + "&fmt=json3";
+    const subtitleUrl = track.baseUrl + "&fmt=json3";
 
-    // STEP 2 — DOWNLOAD SUBTITLES
-
-    const subsRes = await fetch(timedtextUrl, {
-      headers: {
-        "user-agent": "Mozilla/5.0"
-      }
+    const subs = await fetch(subtitleUrl, {
+      headers: { "user-agent": "Mozilla/5.0" }
     });
 
-    const subsJson = await subsRes.json();
+    const json = await subs.json();
 
-    if (!subsJson.events) {
-      return res.json({
-        step: "events",
-        error: "subtitle json invalid",
-        debug: subsJson
-      });
-    }
-
-    // STEP 3 — PARSE TEXT
-
-    const transcript = subsJson.events
+    const transcript = json.events
       .filter(e => e.segs)
       .map(e => e.segs.map(s => s.utf8).join(""))
       .join(" ");
 
     res.json({
       success: true,
-      videoId,
       language: track.languageCode,
       transcript
     });
@@ -97,7 +105,6 @@ export default async function handler(req, res) {
   } catch (err) {
 
     res.status(500).json({
-      step: "catch",
       error: err.message
     });
 
