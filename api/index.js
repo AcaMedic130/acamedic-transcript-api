@@ -1,7 +1,7 @@
-const { YoutubeTranscript } = require('youtube-transcript');
+import { YoutubeTranscript } from 'youtube-transcript';
 
-module.exports = async function handler(req, res) {
-  // 1. Configurar CORS para permitir que tu Blogger se conecte sin bloqueos
+export default async function handler(req, res) {
+  // 1. Configurar CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
 
@@ -9,7 +9,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // 2. Obtener el ID del video de la URL (?v=ID)
+  // 2. Obtener el ID del video
   const videoId = req.query.v;
 
   if (!videoId) {
@@ -17,18 +17,18 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // 3. Extraer los subtítulos (intenta primero en español)
+    // 3. Extraer los subtítulos
     const transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'es' });
 
-    // 4. Formatear los datos EXACTAMENTE como los necesita tu código de Blogger
+    // 4. Formatear los datos
     const formattedData = transcript.map(t => ({
-      start: t.offset / 1000, // Convierte milisegundos a segundos
+      start: t.offset / 1000,
       text: t.text
     }));
 
     const fullText = transcript.map(t => t.text).join(' ');
 
-    // 5. Enviar la respuesta exitosa
+    // 5. Enviar respuesta exitosa
     res.status(200).json({
       success: true,
       data: formattedData,
@@ -37,9 +37,10 @@ module.exports = async function handler(req, res) {
 
   } catch (error) {
     console.error("Error al obtener subtítulos:", error.message);
+    // IMPORTANTE: Devolvemos el mensaje de error real para saber qué falló
     res.status(500).json({ 
       success: false, 
-      error: "El video no tiene subtítulos habilitados o están bloqueados." 
+      error: error.message || "El video no tiene subtítulos habilitados." 
     });
   }
-};
+}
