@@ -1,8 +1,5 @@
 {
-  "name": "acamedic-transcript",
+  "name": "youtube-transcript-api",
   "version": "1.0.0",
-  "type": "module",
-  "dependencies": {
-    "youtube-transcript": "^1.2.1"
-  }
+  "type": "module"
 }
