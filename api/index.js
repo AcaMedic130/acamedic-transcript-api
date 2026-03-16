@@ -10,27 +10,37 @@ export default async function handler(req, res) {
 
   try {
 
-    // 1️⃣ descargar HTML del video
-    const html = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: { "User-Agent": "Mozilla/5.0" }
-    }).then(r => r.text());
+    const response = await fetch(
+      "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          context: {
+            client: {
+              clientName: "WEB",
+              clientVersion: "2.20240101.00.00"
+            }
+          },
+          videoId: videoId
+        })
+      }
+    );
 
-    // 2️⃣ buscar directamente el URL de timedtext
-    const match = html.match(/https:\/\/www\.youtube\.com\/api\/timedtext[^\"]+/);
+    const player = await response.json();
 
-    if (!match) {
-      return res.status(404).json({ error: "Timedtext URL not found" });
+    const tracks =
+      player?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+
+    if (!tracks || tracks.length === 0) {
+      return res.status(404).json({ error: "No subtitles available" });
     }
 
-    let timedtextUrl = match[0];
+    let url = tracks[0].baseUrl + "&fmt=json3";
 
-    // asegurar formato JSON
-    if (!timedtextUrl.includes("fmt=json3")) {
-      timedtextUrl += "&fmt=json3";
-    }
-
-    // 3️⃣ descargar subtítulos
-    const data = await fetch(timedtextUrl).then(r => r.json());
+    const data = await fetch(url).then(r => r.json());
 
     const transcript = data.events
       .filter(e => e.segs)
@@ -41,11 +51,10 @@ export default async function handler(req, res) {
 
     const fullText = transcript.map(t => t.text).join(" ");
 
-    res.status(200).json({
+    res.json({
       success: true,
       transcript,
-      fullText,
-      url: timedtextUrl
+      fullText
     });
 
   } catch (error) {
