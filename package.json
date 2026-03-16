@@ -1,0 +1,10 @@
+{
+  "name": "acamedic-transcript",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node api/index.js"
+  },
+  "dependencies": {
+    "youtube-transcript": "^1.2.1"
+  }
+}
