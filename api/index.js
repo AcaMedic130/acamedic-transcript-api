@@ -1,6 +1,6 @@
-import { YoutubeTranscript } from 'youtube-transcript';
+const { YoutubeTranscript } = require('youtube-transcript');
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   // 1. Configurar CORS para permitir que tu Blogger se conecte sin bloqueos
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
@@ -42,4 +42,4 @@ export default async function handler(req, res) {
       error: "El video no tiene subtítulos habilitados o están bloqueados." 
     });
   }
-}
+};
