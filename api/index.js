@@ -10,16 +10,21 @@ export default async function handler(req, res) {
 
   try {
 
-    const html = await fetch(`https://www.youtube.com/watch?v=${videoId}`)
-      .then(r => r.text());
+    // 1️⃣ descargar HTML del video
+    const html = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
+    }).then(r => r.text());
 
-    const playerResponseMatch = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});/);
+    // 2️⃣ extraer ytInitialPlayerResponse
+    const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{.*?\})\s*;/s);
 
-    if (!playerResponseMatch) {
-      return res.status(404).json({ error: "No player response found" });
+    if (!match) {
+      return res.status(500).json({ error: "Player response not found" });
     }
 
-    const playerResponse = JSON.parse(playerResponseMatch[1]);
+    const playerResponse = JSON.parse(match[1]);
 
     const tracks =
       playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
@@ -28,12 +33,12 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: "No subtitles available" });
     }
 
-    const baseUrl = tracks[0].baseUrl;
+    // 3️⃣ obtener URL real del transcript
+    const baseUrl = tracks[0].baseUrl + "&fmt=json3";
 
-    const transcriptData = await fetch(baseUrl + "&fmt=json3")
-      .then(r => r.json());
+    const data = await fetch(baseUrl).then(r => r.json());
 
-    const transcript = transcriptData.events
+    const transcript = data.events
       .filter(e => e.segs)
       .map(e => ({
         start: e.tStartMs / 1000,
@@ -48,10 +53,10 @@ export default async function handler(req, res) {
       fullText
     });
 
-  } catch (err) {
+  } catch (error) {
 
     res.status(500).json({
-      error: err.message
+      error: error.message
     });
 
   }
