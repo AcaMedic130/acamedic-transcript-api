@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // Configuración de CORS para permitir que tu frontend en Blogspot se comunique
+  // Configuración de CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
 
@@ -14,42 +14,77 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Obtenemos el HTML de la página del video simulando ser un navegador
+    // 1. PETICIÓN ANTI-BLOQUEO A YOUTUBE
+    // El 'Cookie: CONSENT...' es vital en Vercel para saltar la pantalla de Aceptar Cookies de Google.
     const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
         headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept-Language': 'es-ES,es;q=0.9'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
+            'Cookie': 'CONSENT=YES+cb.20210328-17-p0.es+FX+478'
         }
     });
+    
     const html = await response.text();
 
-    // 2. Extraemos el array de subtítulos oculto en el código de YouTube
-    const captionRegex = /"captionTracks":\s*(\[.*?\])/;
-    const match = html.match(captionRegex);
+    // 2. EXTRACCIÓN SÚPER ROBUSTA (Doble Método)
+    let captionTracks = [];
 
-    if (!match || !match[1]) {
-      throw new Error('Este video no tiene subtítulos disponibles.');
+    // Método A: Buscar el array JSON directo
+    const regexCaptions = /"captionTracks":\s*(\[.*?\])/;
+    const matchCaptions = html.match(regexCaptions);
+    
+    if (matchCaptions && matchCaptions[1]) {
+        try {
+            captionTracks = JSON.parse(matchCaptions[1]);
+        } catch (e) {
+            // Falla silenciosa para pasar al Método B
+        }
     }
 
-    const captionTracks = JSON.parse(match[1]);
+    // Método B: Desempaquetar el objeto completo 'ytInitialPlayerResponse' si el A falla
+    if (!captionTracks || captionTracks.length === 0) {
+        try {
+            let jsonString = html.split('ytInitialPlayerResponse = ')[1];
+            if (jsonString) {
+                jsonString = jsonString.split('</script>')[0];
+                jsonString = jsonString.replace(/;var\s+meta.*/, ''); // Limpiar basura al final
+                jsonString = jsonString.replace(/;window.*/, '');
+                jsonString = jsonString.trim();
+                if (jsonString.endsWith(';')) jsonString = jsonString.slice(0, -1);
 
-    // 3. Buscamos subtítulos en Español ('es'), si no hay, tomamos el por defecto
-    let track = captionTracks.find(t => t.languageCode.startsWith('es'));
-    if (!track) {
-        track = captionTracks[0]; 
+                const playerResponse = JSON.parse(jsonString);
+                captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+            }
+        } catch (e) {
+            console.error("Fallo el Método B de extracción");
+        }
     }
 
-    // 4. Descargamos el archivo XML con los tiempos y textos de YouTube
-    const transcriptResponse = await fetch(track.baseUrl);
+    // Validación final: ¿Existen subtítulos?
+    if (!captionTracks || captionTracks.length === 0) {
+         throw new Error('Este video no tiene subtítulos habilitados (ni manuales ni generados automáticamente).');
+    }
+
+    // 3. SELECCIÓN INTELIGENTE DEL IDIOMA
+    // Buscamos: Español manual -> Español generado (asr) u otras variantes -> El primero por defecto
+    let selectedTrack = 
+        captionTracks.find(t => t.languageCode === 'es' && !t.kind) || 
+        captionTracks.find(t => t.languageCode.includes('es')) || 
+        captionTracks[0];
+
+    // 4. DESCARGA DEL XML DE YOUTUBE
+    const transcriptResponse = await fetch(selectedTrack.baseUrl);
     const transcriptXml = await transcriptResponse.text();
 
-    // 5. Parseamos el XML usando una expresión regular
-    const regex = /<text\s+start="([\d.]+)"[^>]*>(.*?)<\/text>/g;
+    // 5. PARSEO DEL XML OFICIAL
+    // Captura start, ignora atributos extras y obtiene el texto
+    const textRegex = /<text\s+start="([\d.]+)"(?:[^>]*)>(.*?)<\/text>/g;
+    
     let result;
     const formattedData = [];
     const textParts = [];
 
-    // Función auxiliar para decodificar entidades HTML (ej. &quot; -> ")
+    // Función para decodificar caracteres HTML (ej. &quot; a ")
     const decodeEntities = (text) => {
         return text.replace(/&amp;/g, '&')
                    .replace(/&lt;/g, '<')
@@ -59,25 +94,23 @@ export default async function handler(req, res) {
                    .replace(/&nbsp;/g, ' ');
     };
 
-    while ((result = regex.exec(transcriptXml)) !== null) {
+    while ((result = textRegex.exec(transcriptXml)) !== null) {
         const start = parseFloat(result[1]);
         let text = result[2];
 
-        // Limpiamos etiquetas internas HTML (como <font>) y decodificamos texto
+        // Limpiar etiquetas internas (como <font color="...">)
         text = text.replace(/<[^>]+>/g, '');
         text = decodeEntities(text);
 
-        formattedData.push({
-            start: start,
-            text: text
-        });
-        textParts.push(text);
+        if (text.trim() !== '') {
+            formattedData.push({ start, text });
+            textParts.push(text);
+        }
     }
 
-    // Unimos todo el texto para enviárselo a tu IA (Gemini/OpenRouter)
     const fullText = textParts.join(' ');
 
-    // 6. Enviamos la respuesta exactamente como el frontend de AcaMedic la espera
+    // 6. RESPUESTA PERFECTA AL FRONTEND
     res.status(200).json({
       success: true,
       data: formattedData,
@@ -85,7 +118,7 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error("Error al obtener subtítulos:", error.message);
+    console.error("Error en Vercel:", error.message);
     res.status(500).json({
       success: false,
       error: error.message
