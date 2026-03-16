@@ -1,8 +1,14 @@
-// Importación por defecto en lugar de importación nombrada con llaves
-import YoutubeTranscript from 'youtube-transcript';
+// 1. Importamos la herramienta nativa de Node.js para forzar la compatibilidad
+import { createRequire } from 'module';
+
+// 2. Creamos la función 'require' para este archivo
+const require = createRequire(import.meta.url);
+
+// 3. Importamos la librería usando el método clásico (CommonJS)
+const { YoutubeTranscript } = require('youtube-transcript');
 
 export default async function handler(req, res) {
-  // 1. Configurar CORS
+  // Configurar CORS para permitir que tu página web se conecte sin bloqueos
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
 
@@ -10,7 +16,7 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // 2. Obtener el ID del video
+  // Obtener el ID del video de la URL (ej: ?v=D5xB4reISfI)
   const videoId = req.query.v;
 
   if (!videoId) {
@@ -18,14 +24,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 3. Extraer los subtítulos
-    // TRUCO DE SEGURIDAD: A veces las librerías CommonJS envuelven su exportación en ".default" 
-    // cuando se usan dentro de un entorno de ES Modules (como Vercel).
-    const ytAPI = YoutubeTranscript.default || YoutubeTranscript;
-    
-    const transcript = await ytAPI.fetchTranscript(videoId, { lang: 'es' });
+    // Extraer los subtítulos en español ('es')
+    const transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'es' });
 
-    // 4. Formatear los datos
+    // Formatear los datos para que sean fáciles de usar en tu HTML
     const formattedData = transcript.map(t => ({
       start: t.offset / 1000,
       text: t.text
@@ -33,7 +35,7 @@ export default async function handler(req, res) {
 
     const fullText = transcript.map(t => t.text).join(' ');
 
-    // 5. Enviar respuesta exitosa
+    // Enviar respuesta exitosa
     res.status(200).json({
       success: true,
       data: formattedData,
@@ -42,10 +44,9 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error("Error al obtener subtítulos:", error.message);
-    // IMPORTANTE: Devolvemos el mensaje de error real para saber qué falló
     res.status(500).json({ 
       success: false, 
-      error: error.message || "El video no tiene subtítulos habilitados." 
+      error: error.message || "No se pudieron obtener los subtítulos. Verifica que el video los tenga habilitados." 
     });
   }
 }
