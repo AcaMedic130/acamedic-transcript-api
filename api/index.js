@@ -1,11 +1,6 @@
 export default async function handler(req, res) {
 
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
 
   const videoId = req.query.v;
 
@@ -18,29 +13,29 @@ export default async function handler(req, res) {
 
   try {
 
-    const url = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=es&fmt=json3`;
+    const url = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=es`;
 
     const response = await fetch(url);
 
-    if (!response.ok) {
-      throw new Error("No se pudieron obtener los subtítulos");
-    }
+    const xml = await response.text();
 
-    const data = await response.json();
-
-    if (!data.events) {
+    if (!xml) {
       return res.status(404).json({
         success: false,
-        error: "El video no tiene subtítulos disponibles"
+        error: "El video no tiene subtítulos en este idioma"
       });
     }
 
-    const transcript = data.events
-      .filter(e => e.segs)
-      .map(e => ({
-        start: e.tStartMs / 1000,
-        text: e.segs.map(s => s.utf8).join("")
-      }));
+    // extraer texto del XML
+    const matches = [...xml.matchAll(/<text start="([^"]+)" dur="([^"]+)">([^<]+)<\/text>/g)];
+
+    const transcript = matches.map(m => ({
+      start: parseFloat(m[1]),
+      text: m[3]
+        .replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+    }));
 
     const fullText = transcript.map(t => t.text).join(" ");
 
