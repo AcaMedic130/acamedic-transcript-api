@@ -6,25 +6,26 @@ export default async function handler(req, res) {
 
     if (!videoId) {
       return res.status(400).json({
-        step: "validate",
-        error: "Missing video id"
+        error: "missing video id"
       });
     }
 
-    // STEP 1: obtener info del player
-    const playerResponse = await fetch(
+    // STEP 1 — PLAYER API (ANDROID CLIENT)
+
+    const playerRes = await fetch(
       "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
       {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "user-agent": "Mozilla/5.0"
+          "user-agent": "com.google.android.youtube/17.31.35 (Linux; U; Android 11)"
         },
         body: JSON.stringify({
           context: {
             client: {
-              clientName: "WEB",
-              clientVersion: "2.20240101.00.00"
+              clientName: "ANDROID",
+              clientVersion: "17.31.35",
+              androidSdkVersion: 30
             }
           },
           videoId: videoId
@@ -32,13 +33,13 @@ export default async function handler(req, res) {
       }
     );
 
-    const playerJson = await playerResponse.json();
+    const playerJson = await playerRes.json();
 
     if (!playerJson.captions) {
       return res.json({
-        step: "captions-check",
-        error: "Video has no captions",
-        debug: playerJson
+        step: "captions",
+        error: "video has no captions",
+        playability: playerJson.playabilityStatus
       });
     }
 
@@ -49,29 +50,39 @@ export default async function handler(req, res) {
 
     if (!tracks || tracks.length === 0) {
       return res.json({
-        step: "tracks-check",
-        error: "No caption tracks"
+        step: "tracks",
+        error: "no caption tracks"
       });
     }
 
-    const baseUrl = tracks[0].baseUrl + "&fmt=json3";
+    // escoger español si existe
+    let track =
+      tracks.find(t => t.languageCode === "es") ||
+      tracks[0];
 
-    // STEP 2: descargar subtítulos
-    const subtitleResponse = await fetch(baseUrl, {
-      headers: { "user-agent": "Mozilla/5.0" }
+    const timedtextUrl = track.baseUrl + "&fmt=json3";
+
+    // STEP 2 — DOWNLOAD SUBTITLES
+
+    const subsRes = await fetch(timedtextUrl, {
+      headers: {
+        "user-agent": "Mozilla/5.0"
+      }
     });
 
-    const subtitleJson = await subtitleResponse.json();
+    const subsJson = await subsRes.json();
 
-    if (!subtitleJson.events) {
+    if (!subsJson.events) {
       return res.json({
-        step: "subtitle-json",
-        error: "events not found",
-        debug: subtitleJson
+        step: "events",
+        error: "subtitle json invalid",
+        debug: subsJson
       });
     }
 
-    const transcript = subtitleJson.events
+    // STEP 3 — PARSE TEXT
+
+    const transcript = subsJson.events
       .filter(e => e.segs)
       .map(e => e.segs.map(s => s.utf8).join(""))
       .join(" ");
@@ -79,15 +90,15 @@ export default async function handler(req, res) {
     res.json({
       success: true,
       videoId,
+      language: track.languageCode,
       transcript
     });
 
   } catch (err) {
 
-    res.json({
+    res.status(500).json({
       step: "catch",
-      error: err.message,
-      stack: err.stack
+      error: err.message
     });
 
   }
