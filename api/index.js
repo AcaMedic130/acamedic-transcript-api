@@ -1,21 +1,24 @@
 export default async function handler(req, res) {
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
-
-  const videoId = req.query.v;
-
-  if (!videoId) {
-    return res.status(400).json({ error: "Missing video id" });
-  }
-
   try {
 
-    const response = await fetch(
-      "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+    const videoId = req.query.v;
+
+    if (!videoId) {
+      return res.status(400).json({
+        step: "validate",
+        error: "Missing video id"
+      });
+    }
+
+    // STEP 1: obtener info del player
+    const playerResponse = await fetch(
+      "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "content-type": "application/json",
+          "user-agent": "Mozilla/5.0"
         },
         body: JSON.stringify({
           context: {
@@ -29,38 +32,62 @@ export default async function handler(req, res) {
       }
     );
 
-    const player = await response.json();
+    const playerJson = await playerResponse.json();
 
-    const tracks =
-      player?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-
-    if (!tracks || tracks.length === 0) {
-      return res.status(404).json({ error: "No subtitles available" });
+    if (!playerJson.captions) {
+      return res.json({
+        step: "captions-check",
+        error: "Video has no captions",
+        debug: playerJson
+      });
     }
 
-    let url = tracks[0].baseUrl + "&fmt=json3";
+    const tracks =
+      playerJson.captions
+        .playerCaptionsTracklistRenderer
+        .captionTracks;
 
-    const data = await fetch(url).then(r => r.json());
+    if (!tracks || tracks.length === 0) {
+      return res.json({
+        step: "tracks-check",
+        error: "No caption tracks"
+      });
+    }
 
-    const transcript = data.events
+    const baseUrl = tracks[0].baseUrl + "&fmt=json3";
+
+    // STEP 2: descargar subtítulos
+    const subtitleResponse = await fetch(baseUrl, {
+      headers: { "user-agent": "Mozilla/5.0" }
+    });
+
+    const subtitleJson = await subtitleResponse.json();
+
+    if (!subtitleJson.events) {
+      return res.json({
+        step: "subtitle-json",
+        error: "events not found",
+        debug: subtitleJson
+      });
+    }
+
+    const transcript = subtitleJson.events
       .filter(e => e.segs)
-      .map(e => ({
-        start: e.tStartMs / 1000,
-        text: e.segs.map(s => s.utf8).join("")
-      }));
-
-    const fullText = transcript.map(t => t.text).join(" ");
+      .map(e => e.segs.map(s => s.utf8).join(""))
+      .join(" ");
 
     res.json({
       success: true,
-      transcript,
-      fullText
+      videoId,
+      transcript
     });
 
-  } catch (error) {
+  } catch (err) {
 
-    res.status(500).json({
-      error: error.message
+    res.json({
+      step: "catch",
+      error: err.message,
+      stack: err.stack
     });
 
   }
